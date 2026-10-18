@@ -3,7 +3,8 @@
 # Linux System Monitor
 # digunakan untuk melihat informasi sistem yang berjalan
 
-LOG_DIR="$HOME/linux-lab"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$SCRIPT_DIR"
 LOG_FILE="$LOG_DIR/monitor.log"
 
 CPU_THRESHOLD=80
@@ -60,7 +61,7 @@ echo "Waktu    : $CURRENT_TIME"
 echo "Hostname : $HOST"
 
 echo ""
-echo "--- STATUS SUMBER DAYA ---"
+echo "--- STATUS  ---"
 
 check_metric() {
     NAME="$1"

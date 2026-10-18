@@ -1,3 +1,4 @@
 monitor.log
+cron.log
 *.log
 /file_dalem

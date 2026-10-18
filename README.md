@@ -30,8 +30,6 @@ git clone https://github.com/mgaraar/linux-system-monitor.git
 cd linux-system-monitor
 ```
 
-Replace `USERNAME` with your GitHub username.
-
 ## Usage
 
 Run the monitoring script manually:

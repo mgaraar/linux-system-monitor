@@ -18,6 +18,8 @@ A simple Bash-based system monitoring tool built as a Linux administration learn
 - Sends an optional webhook notification when a warning or error occurs.
 - Returns meaningful exit codes for use in cron or other automation.
 - Supports JSON output for integration with other tools.
+- Includes an interactive `--watch` mode that refreshes the report in place.
+- Lets a single run skip logging or locking with `--no-log` and `--no-lock`.
 
 ## Requirements
 
@@ -28,6 +30,7 @@ A simple Bash-based system monitoring tool built as a Linux administration learn
 - `flock` from `util-linux` for run locking (optional).
 - `systemd` and `systemctl` for service checks.
 - `curl` for webhook notifications (optional).
+- `tput` from `ncurses` and a capable `TERM` for the alternate screen in watch mode (optional; the report still works without it).
 - `cron` or a systemd timer for scheduled monitoring.
 
 ## Installation
@@ -67,6 +70,9 @@ bash monitor.sh --help
 | --- | --- | --- |
 | `-s`, `--service <name>` | systemd service to check | `ssh.service` |
 | `-t`, `--threshold <1-100>` | Warning threshold in percent for CPU, RAM, disk, and swap | `80` |
+| `-w`, `--watch [seconds]` | Refresh the report in place until `Ctrl+C` | off, `2` seconds |
+| `--no-log` | Do not write the report to the log file | off |
+| `--no-lock` | Do not use the run lock | off |
 | `--config <file>` | Load configuration from a specific file | `config.sh` next to the script |
 | `--json` | Print the result as a single JSON object | off |
 | `-h`, `--help` | Show usage information | - |
@@ -85,7 +91,33 @@ bash monitor.sh --config /etc/linux-system-monitor.conf
 
 # Use the exit code in cron or a wrapper script
 bash monitor.sh --json >/dev/null || notify-someone
+
+# Live dashboard, refreshing every second
+bash monitor.sh --watch 1
+
+# One-off report without touching the log or the lock
+bash monitor.sh --no-log --no-lock
 ```
+
+### Watch mode
+
+`--watch` turns the monitor into a small terminal dashboard. It redraws the
+same report on the alternate screen, so your scrollback stays intact, and
+restores the terminal when you press `Ctrl+C`.
+
+```bash
+bash monitor.sh --watch          # refresh every 2 seconds
+bash monitor.sh --watch 0.5      # refresh twice per second
+```
+
+While watch mode is active:
+
+- logging, locking, and webhook notifications are disabled;
+- CPU usage is computed from the delta between two `/proc/stat` samples kept in
+  `MONITOR_CACHE_FILE`, so each frame does not pause for extra sampling;
+- `--json` cannot be combined with `--watch`.
+
+For a single run, `--no-log` and `--no-lock` apply the same suppression.
 
 ### Exit codes
 
@@ -105,7 +137,7 @@ JSON mode prints one object per run (pretty-printed here for readability; the sc
 {
   "timestamp": "2026-11-03 14:15:19",
   "hostname": "example-host",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "threshold": 80,
   "metrics": {
     "cpu": { "value": 1, "status": "normal" },
@@ -132,7 +164,7 @@ Settings are resolved in this order, later entries winning:
 1. Built-in defaults.
 2. `config.sh` next to the script (or the file given with `--config`).
 3. Environment variables with the `MONITOR_` prefix.
-4. CLI flags `-s` and `-t`.
+4. CLI flags `-s`, `-t`, and `-w`.
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -143,6 +175,8 @@ Settings are resolved in this order, later entries winning:
 | `MONITOR_SAMPLE_INTERVAL` | Delay between the two CPU samples, in seconds | `0.5` |
 | `MONITOR_TOP_PROCESSES` | Number of top processes to show (`0` disables) | `3` |
 | `MONITOR_LOCK_FILE` | Lock file used to prevent overlapping runs (empty disables) | `/tmp/linux-system-monitor.lock` |
+| `MONITOR_WATCH_INTERVAL` | Refresh interval for `--watch`, in seconds | `2` |
+| `MONITOR_CACHE_FILE` | CPU sample cache used by watch mode | `${TMPDIR:-/tmp}/linux-system-monitor.cpu` |
 | `MONITOR_NOTIFY_WEBHOOK` | Webhook URL for notifications (empty disables) | empty |
 | `MONITOR_NOTIFY_ON` | When to notify: `warning`, `error`, `always`, `never` | `warning` |
 | `MONITOR_CONFIG` | Alternative configuration file path | `config.sh` |
@@ -211,6 +245,7 @@ journalctl -u linux-system-monitor.service -n 50
 ## Limitations
 
 - CPU usage is a short sample (default 0.5 seconds), not a long-term average.
+- Watch mode keeps no history and refreshes only the current snapshot; two concurrent watch processes share the same cache file and can skew each other's CPU readings.
 - Load average is compared against the total number of cores, without per-core normalization or history.
 - Disk monitoring checks the root filesystem only.
 - Service checks require `systemctl` with `systemd` running as PID 1.
@@ -255,9 +290,12 @@ make check       # lint + fmt-check + test (what CI runs)
 ```text
 tests/
 ├── helpers/common.bash   # fake free/df/ps/systemctl builders
-├── unit/                 # classify, CPU math, service state
-└── integration/          # CLI, full run, lock, log rotation, config precedence
+├── unit/                 # classify, CPU math and cache, service state
+└── integration/          # CLI, full run, watch, lock, log rotation, config precedence
 ```
+
+There are 68 tests. `bats`, `shellcheck`, and `shfmt` are only needed for
+development; `make check` runs the same three checks as CI.
 
 `monitor.sh` can be sourced safely: the CLI only runs when the file is executed
 directly (`BASH_SOURCE` guard). Tests use that to call pure helpers such as

@@ -9,6 +9,14 @@ repo_root() {
 common_setup() {
 	REPO_ROOT="$(repo_root)"
 	export MONITOR="$REPO_ROOT/monitor.sh"
+
+	# Bats lama (mis. 1.5 di Ubuntu 22.04) belum menyediakan BATS_TEST_TMPDIR.
+	if [[ -z "${BATS_TEST_TMPDIR:-}" ]]; then
+		local base="${BATS_RUN_TMPDIR:-${BATS_TMPDIR:-${TMPDIR:-/tmp}}}"
+		BATS_TEST_TMPDIR="$(mktemp -d "$base/bats-test.XXXXXX")"
+		export BATS_TEST_TMPDIR
+	fi
+
 	export FAKE_BIN="$BATS_TEST_TMPDIR/bin"
 	mkdir -p "$FAKE_BIN"
 	export PATH="$FAKE_BIN:$PATH"

@@ -53,3 +53,55 @@ setup() {
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"MONITOR_NOTIFY_ON"* ]]
 }
+
+@test "--help menyebut mode watch dan opsi terkait" {
+	run bash "$MONITOR" --help
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--watch"* ]]
+	[[ "$output" == *"--no-log"* ]]
+	[[ "$output" == *"--no-lock"* ]]
+	[[ "$output" == *"MONITOR_WATCH_INTERVAL"* ]]
+}
+
+@test "--watch tanpa nilai memakai interval default" {
+	run bash -c 'source "$1"; parse_args --watch; printf "%s|%s" "$WATCH" "$CLI_WATCH_INTERVAL"' _ "$MONITOR"
+	[ "$status" -eq 0 ]
+	[ "$output" = "true|" ]
+}
+
+@test "--watch dengan nilai numerik menyimpan interval" {
+	run bash -c 'source "$1"; parse_args --watch 0.5; printf "%s|%s" "$WATCH" "$CLI_WATCH_INTERVAL"' _ "$MONITOR"
+	[ "$status" -eq 0 ]
+	[ "$output" = "true|0.5" ]
+}
+
+@test "--watch diikuti opsi lain tidak menelan opsi tersebut" {
+	run bash -c 'source "$1"; parse_args --watch -t 90; printf "%s|%s|%s" "$WATCH" "$CLI_WATCH_INTERVAL" "$CLI_THRESHOLD"' _ "$MONITOR"
+	[ "$status" -eq 0 ]
+	[ "$output" = "true||90" ]
+}
+
+@test "--watch=abc ditolak" {
+	run bash "$MONITOR" --watch=abc
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"MONITOR_WATCH_INTERVAL"* ]]
+}
+
+@test "--watch 0 ditolak" {
+	run bash "$MONITOR" --watch 0
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"lebih besar dari 0"* ]]
+}
+
+@test "MONITOR_WATCH_INTERVAL=0 ditolak" {
+	export MONITOR_WATCH_INTERVAL=0
+	run bash "$MONITOR" --watch
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"lebih besar dari 0"* ]]
+}
+
+@test "--watch tidak dapat digabung dengan --json" {
+	run bash "$MONITOR" --watch --json
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"tidak dapat digabung"* ]]
+}

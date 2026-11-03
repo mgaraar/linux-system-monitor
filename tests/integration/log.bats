@@ -55,3 +55,10 @@ setup() {
 	[ "$status" -eq 0 ]
 	[ "$(grep -c 'INFORMASI SISTEM' "$LOG_FILE")" -eq 2 ]
 }
+
+@test "opsi --no-log tidak menulis file log" {
+	run bash "$MONITOR" --no-log
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"INFORMASI SISTEM"* ]]
+	[ ! -f "$LOG_FILE" ]
+}

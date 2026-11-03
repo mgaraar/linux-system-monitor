@@ -12,7 +12,7 @@ set -u
 
 export LC_ALL=C
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -25,13 +25,19 @@ DEFAULT_SAMPLE_INTERVAL=0.5
 DEFAULT_TOP_PROCESSES=3
 DEFAULT_NOTIFY_ON="warning"
 DEFAULT_LOCK_FILE="/tmp/linux-system-monitor.lock"
+DEFAULT_WATCH_INTERVAL=2
+DEFAULT_CACHE_FILE="${TMPDIR:-/tmp}/linux-system-monitor.cpu"
 
 # Nilai dari argumen CLI (kosong = tidak ditentukan)
 CLI_SERVICE=""
 CLI_THRESHOLD=""
 CLI_CONFIG=""
+CLI_WATCH_INTERVAL=""
 
 JSON=false
+WATCH=false
+NO_LOG=false
+NO_LOCK=false
 
 usage() {
 	cat <<EOF
@@ -42,6 +48,9 @@ Pemakaian: bash monitor.sh [opsi]
 Opsi:
   -s, --service <nama>      Service systemd yang diperiksa (default: ${DEFAULT_SERVICE})
   -t, --threshold <1-100>   Ambang warning persen untuk CPU/RAM/DISK/swap (default: 80)
+  -w, --watch [detik]       Mode watch: refresh layar terus-menerus (default: ${DEFAULT_WATCH_INTERVAL} detik)
+      --no-log              Jangan tulis output ke log
+      --no-lock             Jangan pakai file lock
       --config <file>       Muat konfigurasi dari file (default: config.sh di folder script)
       --json                Keluarkan hasil sebagai JSON
   -h, --help                Tampilkan bantuan ini
@@ -54,6 +63,8 @@ Konfigurasi lewat environment (contoh: MONITOR_THRESHOLD=90 bash monitor.sh):
   MONITOR_SAMPLE_INTERVAL   Jeda sampling CPU dalam detik (default: 0.5)
   MONITOR_TOP_PROCESSES     Jumlah proses teratas yang ditampilkan (0 = nonaktif)
   MONITOR_LOCK_FILE         File lock agar tidak tumpang tindih (kosong = nonaktif)
+  MONITOR_WATCH_INTERVAL    Jeda refresh mode watch dalam detik (default: ${DEFAULT_WATCH_INTERVAL})
+  MONITOR_CACHE_FILE        File cache sampel CPU untuk mode watch
   MONITOR_NOTIFY_WEBHOOK    URL webhook untuk notifikasi
   MONITOR_NOTIFY_ON         Kapan notifikasi dikirim: warning|error|always|never
   MONITOR_CONFIG            Path file konfigurasi alternatif
@@ -67,6 +78,7 @@ Contoh:
   bash monitor.sh
   bash monitor.sh -s nginx.service -t 90
   bash monitor.sh --json
+  bash monitor.sh --watch 1
   MONITOR_NOTIFY_WEBHOOK="https://example.com/hook" bash monitor.sh
 EOF
 }
@@ -136,6 +148,28 @@ parse_args() {
 			CLI_CONFIG="${1#*=}"
 			shift
 			;;
+		-w | --watch)
+			WATCH=true
+			# Interval opsional: hanya dikonsumsi bila berupa angka.
+			if [[ $# -ge 2 ]] && is_number "$2"; then
+				CLI_WATCH_INTERVAL="$2"
+				shift
+			fi
+			shift
+			;;
+		--watch=*)
+			WATCH=true
+			CLI_WATCH_INTERVAL="${1#*=}"
+			shift
+			;;
+		--no-log)
+			NO_LOG=true
+			shift
+			;;
+		--no-lock)
+			NO_LOCK=true
+			shift
+			;;
 		--json)
 			JSON=true
 			shift
@@ -173,6 +207,8 @@ load_config() {
 	ENV_LOCK_FILE="${MONITOR_LOCK_FILE-__UNSET__}"
 	ENV_NOTIFY_WEBHOOK="${MONITOR_NOTIFY_WEBHOOK-__UNSET__}"
 	ENV_NOTIFY_ON="${MONITOR_NOTIFY_ON-__UNSET__}"
+	ENV_WATCH_INTERVAL="${MONITOR_WATCH_INTERVAL-__UNSET__}"
+	ENV_CACHE_FILE="${MONITOR_CACHE_FILE-__UNSET__}"
 
 	if [[ -f "$CONFIG_FILE" ]]; then
 		# shellcheck source=/dev/null
@@ -189,6 +225,8 @@ load_config() {
 	[[ "$ENV_LOCK_FILE" == "__UNSET__" ]] || MONITOR_LOCK_FILE="$ENV_LOCK_FILE"
 	[[ "$ENV_NOTIFY_WEBHOOK" == "__UNSET__" ]] || MONITOR_NOTIFY_WEBHOOK="$ENV_NOTIFY_WEBHOOK"
 	[[ "$ENV_NOTIFY_ON" == "__UNSET__" ]] || MONITOR_NOTIFY_ON="$ENV_NOTIFY_ON"
+	[[ "$ENV_WATCH_INTERVAL" == "__UNSET__" ]] || MONITOR_WATCH_INTERVAL="$ENV_WATCH_INTERVAL"
+	[[ "$ENV_CACHE_FILE" == "__UNSET__" ]] || MONITOR_CACHE_FILE="$ENV_CACHE_FILE"
 
 	SERVICE_NAME="${CLI_SERVICE:-${MONITOR_SERVICE:-$DEFAULT_SERVICE}}"
 	THRESHOLD="${CLI_THRESHOLD:-${MONITOR_THRESHOLD:-$DEFAULT_THRESHOLD}}"
@@ -199,6 +237,8 @@ load_config() {
 	LOCK_FILE="${MONITOR_LOCK_FILE:-$DEFAULT_LOCK_FILE}"
 	NOTIFY_WEBHOOK="${MONITOR_NOTIFY_WEBHOOK:-}"
 	NOTIFY_ON="${MONITOR_NOTIFY_ON:-$DEFAULT_NOTIFY_ON}"
+	WATCH_INTERVAL="${CLI_WATCH_INTERVAL:-${MONITOR_WATCH_INTERVAL:-$DEFAULT_WATCH_INTERVAL}}"
+	CACHE_FILE="${MONITOR_CACHE_FILE:-$DEFAULT_CACHE_FILE}"
 
 	# Folder log relatif dihitung dari folder script
 	if [[ "$LOG_DIR" != /* ]]; then
@@ -230,6 +270,26 @@ validate_config() {
 
 	if ! is_number "$SAMPLE_INTERVAL"; then
 		err "MONITOR_SAMPLE_INTERVAL harus berupa angka (contoh: 0.5)"
+		exit 2
+	fi
+
+	if ! is_number "$WATCH_INTERVAL"; then
+		err "MONITOR_WATCH_INTERVAL harus berupa angka (contoh: 2)"
+		exit 2
+	fi
+
+	if ! awk -v v="$WATCH_INTERVAL" 'BEGIN { exit !(v > 0) }'; then
+		err "MONITOR_WATCH_INTERVAL harus lebih besar dari 0"
+		exit 2
+	fi
+
+	if [[ -z "$CACHE_FILE" ]]; then
+		err "MONITOR_CACHE_FILE tidak boleh kosong"
+		exit 2
+	fi
+
+	if [[ "$WATCH" == true && "$JSON" == true ]]; then
+		err "opsi --watch tidak dapat digabung dengan --json"
 		exit 2
 	fi
 
@@ -343,6 +403,49 @@ get_cpu_usage() {
 	after="$(read_cpu_times)" || return 1
 
 	cpu_percent_from_samples "$before" "$after"
+}
+
+# ---------- cache sampel CPU untuk mode watch ----------
+
+read_cpu_cache() {
+	[[ -f "$CACHE_FILE" ]] || return 1
+
+	local sample
+	sample="$(<"$CACHE_FILE")"
+	sample="${sample//[[:space:]]/ }"
+	sample="${sample# }"
+	sample="${sample% }"
+	[[ -n "$sample" ]] || return 1
+
+	printf '%s\n' "$sample"
+}
+
+write_cpu_cache() {
+	printf '%s\n' "$1" >"$CACHE_FILE" 2>/dev/null
+}
+
+# Simpan sampel sekarang sebagai pembanding untuk frame berikutnya.
+prime_cpu_cache() {
+	local sample
+	sample="$(read_cpu_times)" || return 1
+	write_cpu_cache "$sample"
+}
+
+# Hitung CPU memakai sampel terakhir di cache, lalu perbarui cache.
+# Frame pertama tanpa cache dianggap belum punya pembanding (exit 1).
+get_cpu_usage_cached() {
+	local before after percent
+
+	after="$(read_cpu_times)" || return 1
+	before="$(read_cpu_cache)" || return 1
+
+	percent="$(cpu_percent_from_samples "$before" "$after")" || {
+		write_cpu_cache "$after" || true
+		return 1
+	}
+
+	write_cpu_cache "$after" || true
+	printf '%s' "$percent"
 }
 
 # Pemakaian RAM berdasarkan kolom available.
@@ -517,6 +620,7 @@ notify() {
 	local message payload
 
 	[[ -n "$NOTIFY_WEBHOOK" ]] || return 0
+	[[ "$WATCH" != true ]] || return 0
 
 	case "$NOTIFY_ON" in
 	never) return 0 ;;
@@ -543,7 +647,11 @@ main() {
 	local load_all load1 load5 load15 load_status cpu_count
 	local overall code status summary procs
 
-	cpu_usage="$(get_cpu_usage || true)"
+	if [[ "$WATCH" == true ]]; then
+		cpu_usage="$(get_cpu_usage_cached || get_cpu_usage || true)"
+	else
+		cpu_usage="$(get_cpu_usage || true)"
+	fi
 	ram_usage="$(get_ram_usage || true)"
 	swap_usage="$(get_swap_usage || true)"
 	disk_usage="$(get_disk_usage || true)"
@@ -685,6 +793,71 @@ main() {
 	return "$code"
 }
 
+# ---------- mode watch ----------
+
+WATCH_SCREEN=false
+
+watch_cleanup() {
+	[[ "$WATCH_SCREEN" == true ]] || return 0
+	WATCH_SCREEN=false
+	tput cnorm 2>/dev/null || true
+	tput rmcup 2>/dev/null || true
+}
+
+watch_enter_screen() {
+	if ! command -v tput >/dev/null 2>&1 || [[ -z "${TERM:-}" ]]; then
+		warn "tput/TERM tidak tersedia, mode watch berjalan tanpa layar alternatif"
+		return 0
+	fi
+
+	if tput smcup 2>/dev/null; then
+		WATCH_SCREEN=true
+		tput civis 2>/dev/null || true
+	fi
+}
+
+watch_clear() {
+	if [[ "$WATCH_SCREEN" == true ]] && tput clear 2>/dev/null; then
+		return 0
+	fi
+	printf '\033[2J\033[H'
+}
+
+run_watch() {
+	local iterations="${MONITOR_WATCH_ITERATIONS:-0}"
+	local frames=0
+
+	if ! is_uint "$iterations"; then
+		err "MONITOR_WATCH_ITERATIONS harus berupa angka bulat"
+		return 2
+	fi
+
+	trap watch_cleanup EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	trap 'exit 129' HUP
+
+	watch_enter_screen
+
+	# Mulai dari sampel baru agar frame pertama hanya mencakup satu interval.
+	prime_cpu_cache || true
+
+	while true; do
+		sleep "$WATCH_INTERVAL" 2>/dev/null || sleep 1
+		watch_clear
+		main || true
+
+		frames=$((frames + 1))
+		if ((iterations > 0 && frames >= iterations)); then
+			break
+		fi
+	done
+
+	watch_cleanup
+	trap - EXIT INT TERM HUP
+	return 0
+}
+
 # ---------- bootstrap ----------
 
 run_cli() {
@@ -692,8 +865,18 @@ run_cli() {
 	load_config
 	validate_config
 
-	if ! acquire_lock; then
+	if [[ "$WATCH" == true ]]; then
+		run_watch
+		return $?
+	fi
+
+	if [[ "$NO_LOCK" != true ]] && ! acquire_lock; then
 		return 0
+	fi
+
+	if [[ "$NO_LOG" == true ]]; then
+		main
+		return $?
 	fi
 
 	local log_writable=false

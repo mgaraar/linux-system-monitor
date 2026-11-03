@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-03
+
+### Added
+
+- `--watch [detik]` mode: refresh layar terus-menerus memakai alternate screen,
+  dengan `Ctrl+C` yang mengembalikan terminal ke kondisi semula.
+- `--no-log` dan `--no-lock` untuk melewati penulisan log dan file lock.
+- Cache sampel `/proc/stat` di `${TMPDIR:-/tmp}/linux-system-monitor.cpu` agar
+  mode watch menghitung CPU tanpa menunggu sampling setiap frame.
+- Konfigurasi `MONITOR_WATCH_INTERVAL` dan `MONITOR_CACHE_FILE`.
+
+### Changed
+
+- Mode watch otomatis tidak menulis log, tidak memakai lock, dan tidak
+  mengirim notifikasi webhook.
+- `--watch` tidak dapat digabung dengan `--json`.
+
 ## [2.0.0] - 2026-11-03
 
 ### Added

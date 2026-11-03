@@ -30,3 +30,13 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"dilewati"* ]]
 }
+
+@test "opsi --no-lock mengabaikan lock yang sedang dipegang" {
+	flock -n "$MONITOR_LOCK_FILE" -c 'sleep 2' &
+	sleep 0.2
+
+	run bash "$MONITOR" --no-lock
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"dilewati"* ]]
+	[[ "$output" == *"INFORMASI SISTEM"* ]]
+}

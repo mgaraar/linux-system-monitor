@@ -21,6 +21,7 @@ common_setup() {
 	export MONITOR_SAMPLE_INTERVAL=0.05
 	export MONITOR_NOTIFY_WEBHOOK=""
 	export MONITOR_NOTIFY_ON="never"
+	export MONITOR_CACHE_FILE="$BATS_TEST_TMPDIR/cpu.cache"
 }
 
 write_fake() {

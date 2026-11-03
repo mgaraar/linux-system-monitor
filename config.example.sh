@@ -26,6 +26,13 @@ MONITOR_LOG_MAX_LINES=5000
 # Jeda antar dua sampel /proc/stat saat mengukur CPU (detik).
 MONITOR_SAMPLE_INTERVAL=0.5
 
+# Jeda refresh layar pada mode watch (detik).
+MONITOR_WATCH_INTERVAL=2
+
+# File cache sampel CPU untuk mode watch. Kosongkan untuk memakai
+# ${TMPDIR:-/tmp}/linux-system-monitor.cpu.
+MONITOR_CACHE_FILE=""
+
 # Jumlah proses teratas yang ditampilkan. Set 0 untuk menonaktifkan.
 MONITOR_TOP_PROCESSES=3
 

@@ -141,3 +141,13 @@ fi'
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"NOT FOUND"* ]]
 }
+
+@test "--watch menampilkan satu frame dan tidak menulis log" {
+	export MONITOR_WATCH_ITERATIONS=1
+
+	run bash "$MONITOR" --watch 0.1
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"INFORMASI SISTEM"* ]]
+	[[ "$output" == *"Status keseluruhan: NORMAL"* ]]
+	[ ! -f "$MONITOR_LOG_DIR/monitor.log" ]
+}

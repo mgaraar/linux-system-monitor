@@ -1,0 +1,13 @@
+[Unit]
+Description=Jalankan Linux System Monitor secara berkala
+
+[Timer]
+# Jalankan 1 menit setelah boot, lalu setiap 5 menit.
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=linux-system-monitor.service
+
+[Install]
+WantedBy=timers.target

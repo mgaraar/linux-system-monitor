@@ -1,4 +1,7 @@
 monitor.log
 cron.log
 *.log
-/file_dalem
+*.tmp
+
+# Konfigurasi lokal (salin dari config.example.sh)
+config.sh
